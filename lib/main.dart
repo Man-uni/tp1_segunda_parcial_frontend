@@ -1,122 +1,222 @@
+import 'dart:convert';
+import 'package:tp1_segunda_parcial_frontend/models/Productos.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const MiApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MiApp extends StatelessWidget {
+  const MiApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: ListaProductos(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
+class ListaProductos extends StatefulWidget {   // cambia
+  const ListaProductos({super.key});
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<ListaProductos> createState() => _ListaState();
+}
+ 
+class _ListaState extends State<ListaProductos> {
+  final _service = ProductoService();    // NUEVO
+  List<Producto> _productos = [];        // NUEVO
+  bool _cargando = true;                 // NUEVO
+  late TextEditingController _filtro;     
+ 
+  @override
+  void initState() {                     // NUEVO
+    super.initState();
+    _filtro = TextEditingController();
+    _cargar();
+  }
+ 
+  Future<void> _cargar() async {         // NUEVO
+    final datos = await _service.listar();
+    if (!mounted) return;
+    setState(() { _productos = datos; _cargando = false; });
+  }
+
+  Future<void> _abrirDetalle([Producto? p]) async {  // NUEVO
+    final huboCambio = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+          builder: (context) => DetalleScreen(producto: p)),
+    );
+    if (huboCambio == true) _cargar();   // refresca
+  }
+ 
+  @override
+  Widget build(BuildContext context) {
+    final productosFiltrados = _productos.where((p) {
+      return p.nombre
+          .toLowerCase()
+          .startsWith(_filtro.text.toLowerCase()); //coincidencia de las letras en orden
+          //contains(_filtro.text.toLowerCase()); //sólo debe contener las letras, no importa el orden
+    }).toList();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Productos'),
+        backgroundColor: const Color(0xFF1B263B),
+        foregroundColor: Colors.white,
+      ),
+      body: _cargando
+          ? const Center(
+              child: CircularProgressIndicator())   // NUEVO
+          : Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(children: [
+                TextField(
+                  controller: _filtro,
+                  decoration: const InputDecoration(
+                      labelText: 'Filtrar por nombre',
+                      border: OutlineInputBorder()),
+                  onChanged: (value) {
+                    setState(() {}); // Actualiza la lista al cambiar el filtro
+                  },
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: productosFiltrados.length,
+                    itemBuilder: (context, i) {
+                      final p = productosFiltrados[i];
+                      return ListTile(
+                        title: Text(p.nombre),
+                        subtitle: Text('Gs. ${p.precio}'),
+                        onTap: () => _abrirDetalle(p),  // cambia
+                      );
+                  }),
+                ),
+              ]),
+            ),
+      floatingActionButton: FloatingActionButton(  // NUEVO
+        onPressed: () => _abrirDetalle(),
+        backgroundColor: const Color(0xFF1B263B), 
+        foregroundColor: Colors.white,           
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class DetalleScreen extends StatefulWidget {
+  final Producto? producto;   // cambia: null = producto nuevo
+  const DetalleScreen({super.key, this.producto});
+  @override
+  State<DetalleScreen> createState() => _DetalleState();
+}
+ 
+class _DetalleState extends State<DetalleScreen> {
+  final _service = ProductoService();
+  late final TextEditingController _nombre;
+  late final TextEditingController _precio;
+  bool get _esNuevo => widget.producto == null;
+ 
+  @override
+  void initState() {
+    super.initState();
+    _nombre = TextEditingController(
+        text: widget.producto?.nombre ?? '');
+    _precio = TextEditingController(
+        text: widget.producto?.precio.toString() ?? '');
+  }
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  Future<void> _guardar() async {
+    final p = Producto(
+      id: widget.producto?.id,
+      nombre: _nombre.text,
+      precio: int.tryParse(_precio.text) ?? 0,
+    );
+    if (_esNuevo) {
+      await _service.agregar(p);      // POST
+    } else {
+      await _service.modificar(p);    // PUT
+    }
+    if (!mounted) return;
+    Navigator.pop(context, true);     // avisa a la lista
+  }
+ 
+  Future<void> _eliminar() async {
+    await _service.eliminar(widget.producto!.id!);  // DELETE
+    if (!mounted) return;
+    Navigator.pop(context, true);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Text(_esNuevo
+            ? 'Nuevo producto' : 'Editar producto'),
+        backgroundColor: const Color(0xFF1B263B),
+        foregroundColor: Colors.white,
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          TextField(
+            controller: _nombre,
+            decoration: const InputDecoration(
+                labelText: 'Nombre',
+                border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _precio,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+                labelText: 'Precio (Gs.)',
+                border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+              onPressed: _guardar,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B263B), // Fondo azul oscuro
+                foregroundColor: Colors.white,            // Texto blanco
+              ),
+              child: const Text('Guardar'),
+          ),
+          if (!_esNuevo)
+            TextButton(
+              onPressed: _eliminar,
+              child: const Text('Eliminar',
+                  style: TextStyle(color: Colors.red)),
             ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+        ]),
       ),
     );
+  }
+}
+
+class ProductoService {
+  static const _base = 'http://10.0.2.2:4003/productos';
+  static const _headers = {'Content-Type': 'application/json'};
+  // GET
+  Future<List<Producto>> listar() async {
+    final r = await http.get(Uri.parse(_base));
+    final List datos = jsonDecode(r.body);
+    return datos.map((j) => Producto.fromJson(j)).toList();
+  }
+  // POST
+  Future<void> agregar(Producto p) async {
+    await http.post(Uri.parse(_base),
+          headers: _headers, body: jsonEncode(p.toJson()));
+  }
+  // PUT /productos/:id
+  Future<void> modificar(Producto p) async {
+    await http.put(Uri.parse('$_base/${p.id}'),
+          headers: _headers, body: jsonEncode(p.toJson()));
+  }
+  // DELETE /productos/:id
+  Future<void> eliminar(int id) async {
+    await http.delete(Uri.parse('$_base/$id'));
   }
 }
